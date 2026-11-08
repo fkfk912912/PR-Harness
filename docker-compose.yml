@@ -1,0 +1,53 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: pr_harness
+      POSTGRES_USER: pr_harness
+      POSTGRES_PASSWORD: pr_harness-local
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pr_harness"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  pr_harness:
+    build: .
+    ports:
+      - "${PR_HARNESS_PORT:-18080}:8080"
+    environment:
+      PR_HARNESS_HOST: 0.0.0.0
+      PR_HARNESS_PORT: 8080
+      PR_HARNESS_DATABASE_URL: postgresql://pr_harness:pr_harness-local@postgres:5432/pr_harness
+      PR_HARNESS_REDIS_URL: redis://redis:6379/0
+      PR_HARNESS_ASYNC_WORKERS: 4
+      PR_HARNESS_SKILLS_DIR: /app/skills
+      PR_HARNESS_AUTH_REQUIRED: "true"
+      PR_HARNESS_AUTH_SECRET: ${PR_HARNESS_AUTH_SECRET:-local-only-change-this-secret-123456}
+      PR_HARNESS_BOOTSTRAP_ADMIN_USERNAME: ${PR_HARNESS_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      PR_HARNESS_BOOTSTRAP_ADMIN_PASSWORD: ${PR_HARNESS_BOOTSTRAP_ADMIN_PASSWORD:-pr_harness-local-admin}
+    env_file:
+      - path: .env
+        required: false
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:

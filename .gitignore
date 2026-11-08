@@ -1,0 +1,36 @@
+# Local credentials (keep the shareable template)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Runtime state, datasets and generated reports
+*.db
+*.db-*
+*.sqlite*
+*.log
+validation/
+output/
+runtime/
+data/
+evaluation_data/*.jsonl
+*.exe
+*.zip
+*.bak
+*~
+.idea/
+.DS_Store
+Thumbs.db
