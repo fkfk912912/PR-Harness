@@ -407,6 +407,11 @@ class AgenticReviewer(Reviewer):
             parsed.files, collaboration,
         )
         execution = ledger.summary()
+        if "prompt_version" in task_input:
+            execution["prompt_release"] = {
+                "lane": task_input.get("release_lane", "stable"),
+                "version": task_input["prompt_version"],
+            }
         context_management = self.context_manager.summary(task_id)
         execution["context_management"] = context_management
         summary = {

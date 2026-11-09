@@ -32,11 +32,13 @@ class ReleaseManager:
 
     def observe(
         self, tenant_id: str, skill_name: str, failed: bool,
-        lane: str = "canary",
+        lane: str = "canary", candidate_version: Optional[int] = None,
     ) -> Optional[dict]:
         if lane != "canary":
             return self.store.get_deployment(tenant_id, skill_name)
-        result = self.store.record_deployment_result(tenant_id, skill_name, failed)
+        result = self.store.record_deployment_result(
+            tenant_id, skill_name, failed, candidate_version,
+        )
         if result and result["status"] == "rolled_back":
             self.store.create_alert(
                 tenant_id, "rollout:%s" % skill_name, "critical",

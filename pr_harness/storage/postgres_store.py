@@ -478,6 +478,14 @@ class PostgresTaskStore:
         with self._connect() as conn:
             return list(conn.execute("SELECT * FROM skill_versions WHERE skill_name=%s ORDER BY version DESC", (skill_name,)).fetchall())
 
+    def get_skill_version(self, skill_name: str, version: int) -> Optional[Dict[str, Any]]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM skill_versions WHERE skill_name=%s AND version=%s",
+                (skill_name, version),
+            ).fetchone()
+        return dict(row) if row else None
+
     def activate_skill_version(self, skill_name: str, version: int) -> bool:
         with self._connect() as conn:
             exists = conn.execute("SELECT 1 FROM skill_versions WHERE skill_name=%s AND version=%s", (skill_name, version)).fetchone()
@@ -839,12 +847,18 @@ class PostgresTaskStore:
 
     def record_deployment_result(
         self, tenant_id: str, skill_name: str, failed: bool,
+        candidate_version: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         with self._connect() as conn:
+            version_filter = ""
+            values = [int(failed), utc_now(), tenant_id, skill_name]
+            if candidate_version is not None:
+                version_filter = " AND candidate_version=%s AND status='running'"
+                values.append(candidate_version)
             row = conn.execute(
                 "UPDATE deployments SET samples=samples+1,errors=errors+%s,updated_at=%s "
-                "WHERE tenant_id=%s AND skill_name=%s RETURNING *",
-                (int(failed), utc_now(), tenant_id, skill_name),
+                "WHERE tenant_id=%s AND skill_name=%s" + version_filter + " RETURNING *",
+                values,
             ).fetchone()
             if not row:
                 return None

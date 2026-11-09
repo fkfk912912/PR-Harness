@@ -675,6 +675,14 @@ class TaskStore:
             ).fetchall()
         return [dict(item) for item in rows]
 
+    def get_skill_version(self, skill_name: str, version: int) -> Optional[Dict[str, Any]]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM skill_versions WHERE skill_name = ? AND version = ?",
+                (skill_name, version),
+            ).fetchone()
+        return dict(row) if row else None
+
     def activate_skill_version(self, skill_name: str, version: int) -> bool:
         with self._lock, self._connect() as conn:
             exists = conn.execute(
@@ -1063,13 +1071,21 @@ class TaskStore:
 
     def record_deployment_result(
         self, tenant_id: str, skill_name: str, failed: bool,
+        candidate_version: Optional[int] = None,
     ) -> Optional[Dict[str, Any]]:
         with self._lock, self._connect() as conn:
-            conn.execute(
+            version_filter = ""
+            values = [int(failed), utc_now(), tenant_id, skill_name]
+            if candidate_version is not None:
+                version_filter = " AND candidate_version=? AND status='running'"
+                values.append(candidate_version)
+            cursor = conn.execute(
                 "UPDATE deployments SET samples=samples+1,errors=errors+?,updated_at=? "
-                "WHERE tenant_id=? AND skill_name=?",
-                (int(failed), utc_now(), tenant_id, skill_name),
+                "WHERE tenant_id=? AND skill_name=?" + version_filter,
+                values,
             )
+            if not cursor.rowcount:
+                return None
             row = conn.execute(
                 "SELECT * FROM deployments WHERE tenant_id=? AND skill_name=?",
                 (tenant_id, skill_name),

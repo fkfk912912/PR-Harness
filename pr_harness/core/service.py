@@ -141,7 +141,9 @@ class ReviewService:
             extra_headers=dict(self.llm_config.get("headers") or {}),
         )
 
-    def _build_agentic_reviewer(self) -> AgenticReviewer:
+    def _build_agentic_reviewer(
+        self, prompt_version: Optional[Dict[str, Any]] = None,
+    ) -> AgenticReviewer:
         enabled = {
             item.strip() for item in self.settings.enabled_agents.split(",") if item.strip()
         }
@@ -150,7 +152,10 @@ class ReviewService:
         })
         if unknown:
             raise ValueError("unsupported enabled Agent role(s): %s" % ", ".join(sorted(unknown)))
-        active_prompt = self.store.get_active_skill_version("llm-review")
+        active_prompt = (
+            self.store.get_active_skill_version("llm-review")
+            if prompt_version is None else prompt_version
+        )
         structured_config = {}
         if active_prompt:
             run = next((
@@ -186,7 +191,53 @@ class ReviewService:
         self, task_id: str, repository: str, pull_request: Optional[int],
         diff: str, tenant_id: str,
     ):
-        return self.harness.run(task_id, repository, pull_request, diff, tenant_id)
+        task = self.store.get(task_id, tenant_id)
+        if not task:
+            raise ValueError("task not found")
+        task_input = task.get("input") or {}
+        if "prompt_version" not in task_input:
+            # Older queued tasks have a lane but no pinned prompt version.
+            release = self._prompt_assignment(tenant_id, task_id)
+            self.store.update_task_input(task_id, release)
+            task_input.update(release)
+        version = task_input["prompt_version"]
+        prompt = {}
+        if version is not None:
+            prompt = self.store.get_skill_version("llm-review", int(version))
+            if prompt is None:
+                raise ValueError("task prompt version %s does not exist" % version)
+        # Each task owns its reviewer so concurrent lanes cannot overwrite prompts.
+        reviewer = self._build_agentic_reviewer(prompt)
+        harness = ReviewHarness(
+            self.store, reviewer, self.harness.max_steps, self.harness.timeout_seconds,
+            self.harness.node_retries, self.observability,
+        )
+        return harness.run(task_id, repository, pull_request, diff, tenant_id)
+
+    def _prompt_assignment(self, tenant_id: str, task_id: str) -> dict:
+        assignment = self.releases.assignment(tenant_id, "llm-review", task_id)
+        deployment = assignment["deployment"] or {}
+        version_key = (
+            "candidate_version" if assignment["lane"] == "canary" else "stable_version"
+        )
+        version = deployment.get(version_key)
+        if version is None:
+            active = self.store.get_active_skill_version("llm-review")
+            version = active["version"] if active else None
+        if version is not None and self.store.get_skill_version("llm-review", int(version)) is None:
+            raise ValueError("deployment prompt version %s does not exist" % version)
+        return {
+            "release_lane": assignment["lane"], "shadow": assignment["shadow"],
+            "prompt_version": int(version) if version is not None else None,
+        }
+
+    def _observe_release(self, task_id: str, tenant_id: str, failed: bool) -> None:
+        task = self.store.get(task_id, tenant_id) or {}
+        task_input = task.get("input") or {}
+        self.releases.observe(
+            tenant_id, "llm-review", failed,
+            task_input.get("release_lane", "stable"), task_input.get("prompt_version"),
+        )
 
     def reload_skills(self) -> list:
         if self.llm_config:
@@ -246,10 +297,10 @@ class ReviewService:
     ) -> str:
         task_id = str(uuid.uuid4())
         encoded = diff.encode("utf-8")
-        assignment = self.releases.assignment(tenant_id, "llm-review", task_id)
+        release = self._prompt_assignment(tenant_id, task_id)
         self.store.create(task_id, repository, pull_request, {
             "source": source, "diff_bytes": len(encoded), "diff_sha256": hashlib.sha256(encoded).hexdigest(),
-            "release_lane": assignment["lane"], "shadow": assignment["shadow"],
+            **release,
             "mode": RunMode.AGENTIC.value,
             "repository_root": repository_root,
             "enabled_agents": enabled_agents or [],
@@ -263,11 +314,11 @@ class ReviewService:
         tenant_id: str, payload: Dict[str, Any],
     ) -> str:
         task_id = str(uuid.uuid4())
-        assignment = self.releases.assignment(tenant_id, "llm-review", task_id)
+        release = self._prompt_assignment(tenant_id, task_id)
         self.store.create(task_id, repository, pull_request, {
             "source": source, "diff_pending": True,
-            "release_lane": assignment["lane"], "shadow": assignment["shadow"],
             **payload,
+            **release,
             "mode": RunMode.AGENTIC.value,
         }, tenant_id)
         return task_id
@@ -298,15 +349,10 @@ class ReviewService:
                     task_id, repository, pull_request, diff, tenant_id
                 )
             metrics.inc("reviews_total")
-            lane = (self.store.get(task_id, tenant_id).get("input") or {}).get(
-                "release_lane", "stable"
-            )
-            self.releases.observe(tenant_id, "llm-review", False, lane)
+            self._observe_release(task_id, tenant_id, False)
             return {"task_id": task_id, "state": "SUCCESS", "report": report.to_dict()}
         except Exception:
-            task = self.store.get(task_id, tenant_id) or {}
-            lane = (task.get("input") or {}).get("release_lane", "stable")
-            self.releases.observe(tenant_id, "llm-review", True, lane)
+            self._observe_release(task_id, tenant_id, True)
             self.alerts.evaluate(tenant_id)
             raise
 
@@ -368,8 +414,7 @@ class ReviewService:
                     tenant_id,
                 )
             metrics.inc("reviews_total")
-            lane = (task.get("input") or {}).get("release_lane", "stable")
-            self.releases.observe(tenant_id, "llm-review", False, lane)
+            self._observe_release(task_id, tenant_id, False)
             if payload.get("github_issue_url") and self.settings.auto_post_review:
                 client = self.github_client_for_installation(payload.get("installation_id"))
                 client.upsert_comment(
@@ -378,8 +423,7 @@ class ReviewService:
                 )
         except Exception:
             metrics.inc("reviews_failed_total")
-            lane = (task.get("input") or {}).get("release_lane", "stable")
-            self.releases.observe(tenant_id, "llm-review", True, lane)
+            self._observe_release(task_id, tenant_id, True)
             self.alerts.evaluate(tenant_id)
             raise
 
