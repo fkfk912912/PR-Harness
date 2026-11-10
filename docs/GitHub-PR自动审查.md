@@ -22,7 +22,7 @@ GitHub 身份需要目标仓库的 Webhook 管理权限、读取 PR 的权限，
 
 启动器会启动 Python 服务、生成或读取 Webhook 签名密钥、建立专用签名入口与 Cloudflare Quick Tunnel，然后为指定仓库创建或更新 `pull_request` Webhook，并启用报告回评。管理台仅监听本机，隧道入口只转发目标仓库经过签名校验的 Webhook 请求。
 
-保持终端运行。后续可直接 `.\Start-PRHarness.ps1` 使用保存的仓库记录。Python 启动器也可直接运行：
+保持终端运行。用 VS Code 打开项目根目录后，F5 或直接运行 `.\Start-PRHarness.ps1` 会自动启动整套流程。目标仓库优先采用显式参数，其次是 `PR_HARNESS_GITHUB_REPOSITORY`、当前项目的 GitHub `origin`，最后才使用历史记录。Python 启动器也可直接运行：
 
 ```sh
 python scripts/run_github_webhook.py --repository owner/repository --cloudflared /path/to/cloudflared
@@ -32,7 +32,7 @@ python scripts/run_github_webhook.py --repository owner/repository --cloudflared
 
 ## 停止与状态
 
-按 Ctrl+C，或执行 `.\Start-PRHarness.ps1 -Stop`。正常退出时启动器尝试停用本次管理的 Webhook 并停止子进程；异常断电等情况下需在 GitHub 仓库设置中核对 Webhook 状态。
+按 Ctrl+C，或执行 `.\Start-PRHarness.ps1 -Stop`。F5 调试使用同一个清理命令作为 `postDebugTask`，Shift+F5 后会停用本次管理的 Webhook 并停止后端和隧道。清理器根据记录的进程创建时间识别调试器终止后遗留的子进程，下次启动也会先清理旧会话。异常断电等情况下仍需在 GitHub 仓库设置中核对 Webhook 状态。
 
 本机 `validation/github-webhook/status.json` 保存上次连接的仓库和 Webhook 编号，不应删除正在运行的会话状态。整个 `validation/` 被 Git 忽略，新克隆会由启动器自动创建所需目录。
 

@@ -3,22 +3,21 @@
   "configurations": [
     {
       "name": "PR Harness",
-      "type": "PowerShell",
+      "type": "debugpy",
       "request": "launch",
-      "script": "${workspaceFolder}/Start-PRHarness.ps1",
+      "program": "${workspaceFolder}/scripts/run_github_webhook.py",
+      "args": ["--restart"],
+      "python": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "pythonArgs": ["-B"],
       "cwd": "${workspaceFolder}",
-      "createTemporaryIntegratedConsole": true
-    },
-    {
-      "name": "PR Harness: Stop",
-      "type": "PowerShell",
-      "request": "launch",
-      "script": "${workspaceFolder}/Start-PRHarness.ps1",
-      "args": [
-        "-Stop"
-      ],
-      "cwd": "${workspaceFolder}",
-      "createTemporaryIntegratedConsole": true
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "justMyCode": true,
+      "subProcess": false,
+      "postDebugTask": "PR Harness: Stop automatic review"
     }
   ]
 }

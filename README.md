@@ -28,6 +28,8 @@ PR_HARNESS_LLM_MODEL=填写账号实际可用的模型ID
 
 打开 http://127.0.0.1:18080/，粘贴 diff 发起审查；`/health` 可检查服务状态。按 Ctrl+C 停止。默认配置仅监听本机，未配置模型时健康检查仍可能通过。
 
+用 VS Code 打开项目根目录，按 F5 启动后端、Cloudflare 隧道和 GitHub 自动审查，按 Shift+F5 时由清理任务停用 Webhook 并关闭后端和隧道。自动模式需要可用的模型、已登录的 GitHub CLI、仓库 Webhook 管理权限及 Cloudflared。直接运行 `.\Start-PRHarness.ps1` 同样启动自动审查；`-Local` 只启动本地服务，`-Check` 检查本地配置与资源。
+
 Linux / macOS 使用 `python3 -m venv .venv`、`.venv/bin/python -m pip install -r requirements.txt`，复制配置后在项目根目录执行 `.venv/bin/python -m pr_harness`。
 
 ## GitHub 自动审查
@@ -42,6 +44,8 @@ gh auth login
 ```
 
 启动器建立签名校验入口与 Cloudflare 隧道，创建或更新目标仓库 Webhook，并启用报告回评。此命令会修改目标仓库的 Webhook 并允许服务发布审查评论。配置、权限和生命周期说明见 [GitHub 自动审查](docs/GitHub-PR自动审查.md)。
+
+未指定仓库时，自动模式依次读取 `PR_HARNESS_GITHUB_REPOSITORY`、当前项目的 GitHub `origin`、历史会话记录。每次 F5 会先清理本项目的旧会话，再创建新隧道并更新原 Webhook 地址。
 
 ## 目录
 
