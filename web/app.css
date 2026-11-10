@@ -462,6 +462,56 @@ textarea { min-height: 150px; resize: vertical; font: 12px/1.8 "Cascadia Code", 
 .status-panel { margin-bottom: 20px; }
 .status-panel pre { min-height: auto; max-height: 240px; }
 .evolution-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
+.release-notice { margin: 0 0 20px; padding: 14px 18px; border: 1px solid var(--accent-line); border-radius: 10px; background: var(--accent-soft); color: #365984; font-size: 12px; line-height: 1.8; }
+.release-overview { display: grid; grid-template-columns: 1fr 1.25fr; gap: 32px; margin-bottom: 22px; }
+.release-overview h3 { margin: 8px 0; font-size: 22px; }
+.release-overview p { margin-bottom: 0; }
+.release-layout { display: grid; grid-template-columns: minmax(230px, .75fr) minmax(0, 2fr); gap: 20px; align-items: start; margin-bottom: 22px; }
+.candidate-history-panel { padding-inline: 16px; }
+.candidate-history-panel .panel-head { padding-inline: 8px; }
+#evolution-history { max-height: 820px; overflow-y: auto; }
+.candidate-row { display: flex; align-items: center; gap: 13px; width: 100%; padding: 17px 10px; border: 1px solid transparent; border-bottom-color: var(--line); background: transparent; text-align: left; color: var(--ink); border-radius: 8px; }
+.candidate-row:hover { background: var(--surface-soft); }
+.candidate-row.selected { border-color: var(--accent-line); background: var(--accent-soft); }
+.candidate-row .task-copy small, #failure-list .task-copy small { display: block; margin-top: 5px; color: var(--muted); line-height: 1.7; overflow-wrap: anywhere; }
+.candidate-heading { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
+.candidate-heading h3 { font-size: 24px; margin: 4px 0; }
+.candidate-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 15px 0; }
+.candidate-actions button:disabled { cursor: not-allowed; }
+.release-help { font-size: 12px; color: var(--muted); line-height: 1.9; }
+.release-warning { color: var(--red); font-size: 12px; line-height: 1.9; overflow-wrap: anywhere; }
+.metric-scroll { overflow-x: auto; }
+.release-table { width: 100%; border-collapse: collapse; font-size: 12px; white-space: nowrap; }
+.release-table caption { padding: 15px 0 10px; text-align: left; font-weight: 600; }
+.release-table th, .release-table td { padding: 11px 10px; border-bottom: 1px solid var(--line); text-align: left; }
+.release-table th { color: var(--muted); font-weight: 500; }
+.release-table b { color: var(--ink); font-weight: 650; }
+.candidate-detail-panel details, .shadow-observation details { margin-top: 18px; }
+#view-evolution summary { cursor: pointer; color: var(--ink); font-size: 13px; font-weight: 600; padding-block: 6px; }
+#view-evolution pre { min-height: auto; max-height: 340px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+.prompt-diff { color: #244f42; }
+.gate-list { padding-left: 20px; color: var(--muted); font-size: 12px; line-height: 2.1; }
+.gate-pass { color: #247052; }
+.gate-fail { color: var(--red); }
+.shadow-monitor { margin-bottom: 22px; }
+.shadow-monitor progress { display: block; width: 100%; height: 9px; accent-color: var(--accent); }
+.shadow-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 18px 0; }
+.shadow-stats > div { padding: 15px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-soft); }
+.shadow-stats small, .shadow-stats strong { display: block; }
+.shadow-stats small { color: var(--muted); font-size: 11px; }
+.shadow-stats strong { margin-top: 6px; font-size: 17px; }
+.shadow-observation { border-top: 1px solid var(--line); padding: 12px 0; }
+.shadow-observation > summary span { float: right; color: var(--muted); font-size: 11px; font-weight: 400; }
+.evaluation-readiness { margin-top: 18px; }
+.raw-evaluation { margin-top: 22px; }
+.release-dialog { width: min(580px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); padding: 28px; border: 1px solid var(--line-strong); border-radius: 16px; color: var(--ink); background: var(--surface); overflow-y: auto; box-shadow: 0 22px 100px #172a4d30; }
+.release-dialog::backdrop { background: #15243b66; }
+.release-dialog h3 { margin-top: 0; font-size: 20px; }
+.release-dialog > form > p { font-size: 13px; line-height: 1.9; }
+.release-dialog .check { align-items: start; font-size: 12px; line-height: 1.8; }
+.dialog-actions { justify-content: flex-end; margin-bottom: 0; }
+@media (max-width: 960px) { .release-layout { grid-template-columns: 1fr; } #evolution-history { max-height: 300px; } }
+@media (max-width: 700px) { .release-overview { grid-template-columns: 1fr; gap: 20px; } .shadow-stats { grid-template-columns: 1fr; } .release-dialog { padding: 22px; } .candidate-heading { align-items: start; } }
 .workspace-footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 37px; padding: 21px 0 25px; border-top: 1px solid var(--line); color: var(--faint); font-size: 10px; }
 .workspace-footer > span:first-child { font-weight: 650; letter-spacing: .3px; }
 .toast { position: fixed; right: 25px; bottom: 25px; z-index: 150; max-width: min(390px, calc(100vw - 32px)); padding: 13px 18px; border: 1px solid #375d8e; border-radius: 10px; color: #fff; background: #24436b; box-shadow: 0 8px 30px rgba(30, 55, 92, .16); opacity: 0; pointer-events: none; transform: translateY(8px); transition: opacity .2s ease, transform .2s ease; font-size: 12px; }

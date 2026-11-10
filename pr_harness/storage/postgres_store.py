@@ -10,9 +10,10 @@ from typing import Any, Dict, Optional
 
 from pr_harness.core.models import ReviewReport, TaskState, TraceEvent
 from pr_harness.storage.sqlite_store import utc_now
+from pr_harness.storage.prompt_releases import PromptReleaseStore
 
 
-class PostgresTaskStore:
+class PostgresTaskStore(PromptReleaseStore):
     def __init__(self, url: str):
         try:
             import psycopg
@@ -108,6 +109,18 @@ class PostgresTaskStore:
                 min_samples INTEGER NOT NULL DEFAULT 20, status TEXT NOT NULL DEFAULT 'stable',
                 samples INTEGER NOT NULL DEFAULT 0, errors INTEGER NOT NULL DEFAULT 0,
                 updated_at TIMESTAMPTZ NOT NULL, PRIMARY KEY(tenant_id,skill_name))""",
+            "ALTER TABLE deployments ADD COLUMN IF NOT EXISTS max_disagreement_rate DOUBLE PRECISION NOT NULL DEFAULT .2",
+            "ALTER TABLE deployments ADD COLUMN IF NOT EXISTS auto_promote INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE deployments ADD COLUMN IF NOT EXISTS shadow_samples INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE deployments ADD COLUMN IF NOT EXISTS disagreements INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE deployments ADD COLUMN IF NOT EXISTS shadow_errors INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE deployments ADD COLUMN IF NOT EXISTS release_id TEXT NOT NULL DEFAULT ''",
+            "ALTER TABLE deployments ADD COLUMN IF NOT EXISTS previous_version INTEGER",
+            """CREATE TABLE IF NOT EXISTS release_observations (
+                id BIGSERIAL PRIMARY KEY, tenant_id TEXT NOT NULL, skill_name TEXT NOT NULL,
+                task_id TEXT NOT NULL, lane TEXT NOT NULL, primary_json TEXT NOT NULL,
+                candidate_json TEXT, disagreement DOUBLE PRECISION NOT NULL,
+                candidate_failed INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL)""",
             """CREATE TABLE IF NOT EXISTS alerts (
                 id BIGSERIAL PRIMARY KEY, tenant_id TEXT NOT NULL, alert_key TEXT NOT NULL,
                 severity TEXT NOT NULL, message TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open',
@@ -836,6 +849,8 @@ class PostgresTaskStore:
                  float(config.get("max_error_rate", .1)), int(config.get("min_samples", 20)),
                  config.get("status", "running"), utc_now()),
             )
+
+            self._set_release_metadata(conn, tenant_id, skill_name, config)
 
     def get_deployment(self, tenant_id: str, skill_name: str) -> Optional[Dict[str, Any]]:
         with self._connect() as conn:

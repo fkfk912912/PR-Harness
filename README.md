@@ -65,6 +65,8 @@ PR-Harness/
 
 模块路径和主流程见 [目录与流程](docs/目录与流程.md)，API 见 [运行与接口](docs/运行与接口.md)，日常使用见 [操作指南](docs/日常启动与审阅指南.md)。
 
+演进实验室支持查看候选改动、确认 Shadow 试运行、比较实际报告及 Token / 耗时、确认启用和回退；可选择授权达到门槛后自动启用。已有候选保留，更新后重启后端即可加载。详见 [候选评测与 Shadow 发布](docs/候选评测与Shadow发布.md)。
+
 ## 测试与部署
 
 ```powershell
@@ -73,7 +75,7 @@ docker compose config --quiet
 docker compose up -d --build
 ```
 
-本次本地回归共 73 项：68 项通过，5 项因缺少可选评测语料而明确跳过。恢复原始语料后这 5 项会自动执行，详见 [评测数据说明](evaluation_data/README.md)。当前结果不构成真实模型准确率或生产效果结论。
+回归使用离线模型夹具，缺少可选评测语料的 5 项会明确跳过。恢复原始语料后会自动执行，详见 [评测数据说明](evaluation_data/README.md)。当前结果不构成真实模型准确率或生产效果结论。发布页面的隔离浏览器验证方法见 [候选评测与 Shadow 发布](docs/候选评测与Shadow发布.md)。
 
 本地使用 SQLite 与内存队列；Compose 使用 PostgreSQL 和 Redis，属于独立的运行配置。部署前设置自己的认证密钥和管理员凭据。更多配置、测试与贡献说明见 [开发与部署](docs/development.md)。
 

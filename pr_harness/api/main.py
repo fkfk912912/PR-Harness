@@ -128,6 +128,9 @@ class ApiHandler(BaseHTTPRequestHandler):
         if path == "/assets/app.js":
             self._serve_file("app.js")
             return
+        if path == "/assets/evolution.js":
+            self._serve_file("evolution.js")
+            return
         if path == "/health":
             mode = resolve_mode(
                 None, bool(self.service.llm_config)
@@ -234,6 +237,10 @@ class ApiHandler(BaseHTTPRequestHandler):
             self._send_json(200, {
                 "runs": self.service.store.list_evolution_runs(int(query.get("limit", [50])[0]))
             })
+            return
+        if path == "/v1/evolution/console":
+            self._send_json(200, self.service.evolution_console.status(
+                principal.tenant_id, principal.can("manage")))
             return
         if path == "/v1/evolution/status":
             status = self.service.evolution.status()
@@ -472,6 +479,14 @@ class ApiHandler(BaseHTTPRequestHandler):
                 )
                 self._send_json(201, result)
                 return
+            if path == "/v1/evolution/releases":
+                principal = self._principal("manage")
+                payload = self._read_json(body)
+                result = self.service.evolution_console.action(principal.tenant_id, payload)
+                self.service.store.audit(principal.tenant_id, principal.username,
+                    "prompt.release." + str(payload.get("action")), "llm-review", payload)
+                self._send_json(200, result)
+                return
             if path == "/v1/queue/dead-letters/replay":
                 principal = self._principal("manage")
                 payload = self._read_json(body)
@@ -496,7 +511,8 @@ class ApiHandler(BaseHTTPRequestHandler):
                 principal = self._principal("manage")
                 payload = self._read_json(body)
                 result = self.service.evolution.auto_propose(
-                    str(payload.get("skill_name", "llm-review")), principal.tenant_id
+                    str(payload.get("skill_name", "llm-review")), principal.tenant_id,
+                    activation_policy=str(payload.get("activation_policy", "auto")),
                 )
                 if result["decision"] == "activated":
                     self.service.reload_skills()
@@ -508,6 +524,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                 result = self.service.evolution.propose(
                     str(payload.get("skill_name", "")), str(payload.get("prompt", "")),
                     float(payload["regression_score"]) if "regression_score" in payload else None,
+                    activation_policy=str(payload.get("activation_policy", "auto")),
                 )
                 if result["decision"] == "activated":
                     self.service.reload_skills()
@@ -567,10 +584,18 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return
             match = ROLLBACK.match(path)
             if match:
-                self._principal("manage")
-                ok = self.service.evolution.rollback(match.group(1), int(match.group(2)))
+                principal = self._principal("manage")
+                skill, version = match.group(1), int(match.group(2))
+                ok = self.service.store.get_skill_version(skill, version) is not None
                 if ok:
+                    if skill == "llm-review":
+                        previous = self.service.evolution_console.current_version(principal.tenant_id)
+                        self.service.store.activate_prompt_release(principal.tenant_id, skill, version, previous)
+                    else:
+                        self.service.evolution.rollback(skill, version)
                     self.service.reload_skills()
+                self.service.store.audit(principal.tenant_id, principal.username,
+                    "prompt.release.legacy_activate", skill, {"version": version, "activated": ok})
                 self._send_json(200 if ok else 404, {"activated": ok})
                 return
             self._send_json(404, {"error": "not found"})

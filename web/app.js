@@ -247,8 +247,9 @@ async function openTask(id) {
     const task = await api(`/v1/tasks/${encodeURIComponent(id)}`);
     selectedTask = id;
     selectedTaskData = task;
+    evolutionUI.renderTask(task);
     $("#task-report").textContent = formatJson(task);
-    $("#create-fix").classList.toggle("hidden", !(task.report && task.pull_request));
+    $("#create-fix").classList.toggle("hidden", !(task.report && task.pull_request && task.input?.source !== "shadow"));
     const feedbackReady = task.state === "SUCCESS" && task.report;
     $("#feedback-panel").classList.toggle("hidden", !feedbackReady);
     if (feedbackReady) {
@@ -330,41 +331,9 @@ async function loadSkills() {
 }
 
 async function loadFailures() {
-  try {
-    const [failuresData, status, runsData] = await Promise.all([
-      api("/api/failures"),
-      api("/v1/evolution/status"),
-      api("/v1/evolution/runs?limit=5"),
-    ]);
-    $("#evolution-status").textContent = formatJson(status);
-    const cases = failuresData.cases || [];
-    const runs = runsData.runs || [];
-    const failureHtml = cases.length
-      ? cases.slice(0, 8).map((item) => `
-          <div class="task-row">
-            <span class="task-main"><span class="task-glyph">FC</span><span class="task-copy">
-              <span class="task-name">${escapeHtml(feedbackLabels[item.category] || item.category)}</span>
-              <span class="task-meta"><span>${escapeHtml(item.task_id)}</span><span>${escapeHtml((item.payload || {}).note || "无说明")}</span></span>
-            </span></span>
-            <span class="status ${item.resolved ? "state-success" : "state-pending"}">${item.resolved ? "已解决" : "待处理"}</span>
-          </div>`).join("")
-      : '<div class="empty-state"><span><b>暂无失败反馈</b>系统当前没有未处理案例</span></div>';
-    const historyHtml = runs.length
-      ? `<p class="list-section-label">最近评测</p>${runs.map((run) => `
-          <div class="task-row">
-            <span class="task-main"><span class="task-glyph">V${escapeHtml(run.candidate_version)}</span><span class="task-copy">
-              <span class="task-name">${escapeHtml(run.decision)}</span>
-              <span class="task-meta">${Number(run.candidate_score).toFixed(3)} vs ${Number(run.baseline_score).toFixed(3)}</span>
-            </span></span>
-          </div>`).join("")}`
-      : "";
-    $("#failure-list").innerHTML = failureHtml + historyHtml;
-  } catch (error) {
-    $("#evolution-status").textContent = "暂时无法读取评测状态。";
-    $("#failure-list").innerHTML = '<div class="empty-state"><span>反馈加载失败</span></div>';
-    toast(error.message);
-  }
+  await evolutionUI.load();
 }
+
 
 $("#review-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -505,12 +474,10 @@ $("#evolution-form").addEventListener("submit", async (event) => {
     const data = await api("/v1/evolution/propose", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ skill_name: values.get("skill_name"), prompt: values.get("prompt") }),
+      body: JSON.stringify({ skill_name: values.get("skill_name"), prompt: values.get("prompt"), activation_policy: "shadow" }),
     });
-    $("#evolution-result").classList.remove("empty");
-    $("#evolution-result").textContent = formatJson(data);
-    toast("新旧版本回放评测已完成");
-    loadFailures();
+    await evolutionUI.showResult(data);
+    toast("候选评测已完成，请查看门禁与发布状态");
   } catch (error) {
     toast(error.message);
   } finally {
@@ -525,12 +492,10 @@ $("#auto-evolve").addEventListener("click", async () => {
     const data = await api("/v1/evolution/auto", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ skill_name: "llm-review" }),
+      body: JSON.stringify({ skill_name: "llm-review", activation_policy: "shadow" }),
     });
-    $("#evolution-result").classList.remove("empty");
-    $("#evolution-result").textContent = formatJson(data);
-    toast("反馈候选评测已完成");
-    loadFailures();
+    await evolutionUI.showResult(data);
+    toast("候选处理已完成，请查看结果与下一步操作");
   } catch (error) {
     toast(error.message);
   } finally {

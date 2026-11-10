@@ -28,6 +28,7 @@ from pr_harness.evolution.skill_evolution import AgentSkillReplayReviewer, Skill
 from pr_harness.storage.sqlite_store import utc_now
 from pr_harness.core.task_queue import PermanentTaskError, TaskQueue
 from pr_harness.evolution.rollout import ReleaseManager
+from pr_harness.evolution.console import EvolutionConsole
 from pr_harness.repair.verifier import RepairVerifier
 
 
@@ -93,6 +94,7 @@ class ReviewService:
             settings.default_tenant_id,
         )
         self.releases = ReleaseManager(self.store)
+        self.evolution_console = EvolutionConsole(self)
         self.alerts = AlertManager(
             self.store, settings.alert_failure_rate, settings.alert_min_samples
         )
@@ -208,11 +210,20 @@ class ReviewService:
                 raise ValueError("task prompt version %s does not exist" % version)
         # Each task owns its reviewer so concurrent lanes cannot overwrite prompts.
         reviewer = self._build_agentic_reviewer(prompt)
+        if task_input.get("source") == "shadow":
+            reviewer.memory_manager = None
         harness = ReviewHarness(
             self.store, reviewer, self.harness.max_steps, self.harness.timeout_seconds,
             self.harness.node_retries, self.observability,
         )
-        return harness.run(task_id, repository, pull_request, diff, tenant_id)
+        report = harness.run(task_id, repository, pull_request, diff, tenant_id)
+        if task_input.get("shadow") and task_input.get("source") != "shadow":
+            try:
+                self._schedule_shadow(task_id, repository, pull_request, diff, tenant_id)
+            except Exception:
+                # Shadow infrastructure must never replace a successful primary response.
+                metrics.inc("shadow_scheduling_errors_total")
+        return report
 
     def _prompt_assignment(self, tenant_id: str, task_id: str) -> dict:
         assignment = self.releases.assignment(tenant_id, "llm-review", task_id)
@@ -221,7 +232,7 @@ class ReviewService:
             "candidate_version" if assignment["lane"] == "canary" else "stable_version"
         )
         version = deployment.get(version_key)
-        if version is None:
+        if version is None and not deployment:
             active = self.store.get_active_skill_version("llm-review")
             version = active["version"] if active else None
         if version is not None and self.store.get_skill_version("llm-review", int(version)) is None:
@@ -229,7 +240,64 @@ class ReviewService:
         return {
             "release_lane": assignment["lane"], "shadow": assignment["shadow"],
             "prompt_version": int(version) if version is not None else None,
+            "shadow_candidate_version": deployment.get("candidate_version") if assignment["shadow"] else None,
+            "shadow_release_id": deployment.get("release_id") if assignment["shadow"] else None,
         }
+
+    def _schedule_shadow(self, task_id, repository, pull_request, diff, tenant_id):
+        task_input = self.store.get(task_id, tenant_id)["input"]
+        if task_input.get("shadow_task_id"):
+            return
+        deployment = self.store.get_deployment(tenant_id, "llm-review") or {}
+        if (deployment.get("status") != "running"
+                or deployment.get("release_id") != task_input.get("shadow_release_id")):
+            return
+        child_id = str(uuid.uuid4())
+        self.store.create(child_id, repository, pull_request, {
+            **task_input, "source": "shadow", "shadow": False, "release_lane": "shadow",
+            "prompt_version": task_input["shadow_candidate_version"], "primary_task_id": task_id,
+        }, tenant_id)
+        self.store.save_task_payload(child_id, diff)
+        self.store.update_task_input(task_id, {"shadow_task_id": child_id})
+        try:
+            self.queue.submit({"task_id": child_id, "repository": repository,
+                               "pull_request": pull_request, "tenant_id": tenant_id})
+        except Exception as exc:
+            self._on_dead_letter({"task_id": child_id, "tenant_id": tenant_id}, str(exc))
+
+    def _shadow_summary(self, task):
+        report = task.get("report") or {}
+        execution = report.get("execution") or {}
+        findings = report.get("findings") or []
+        checkpoint = self.store.load_checkpoints(task["id"]).get("agentic-lead-session") or {}
+        workers = (checkpoint.get("state") or {}).get("session", {}).get("worker_results") or {}
+        if isinstance(workers, dict):
+            workers = workers.values()
+        return {
+            "task_id": task["id"], "prompt_version": task["input"].get("prompt_version"),
+            "release_id": task["input"].get("shadow_release_id"),
+            "finding_keys": sorted("%s:%s:%s:%s" % (f.get("path"), f.get("line"),
+                f.get("rule_id"), f.get("severity")) for f in findings),
+            "findings": findings, "total_tokens": execution.get("total_tokens", 0),
+            "duration_ms": execution.get("duration_ms", 0),
+            "failed_model_calls": execution.get("failed_model_calls", 0),
+            "failed_workers": sum(item.get("status") == "failed" for item in workers),
+            "state": task["state"], "error": task.get("error"),
+        }
+
+    def _record_shadow(self, task_id, tenant_id):
+        task = self.store.get(task_id, tenant_id)
+        parent_id = (task or {}).get("input", {}).get("primary_task_id")
+        parent = self.store.get(parent_id, tenant_id) if parent_id else None
+        if not parent:
+            return
+        candidate = self._shadow_summary(task)
+        failed = task["state"] != "SUCCESS" or bool(candidate["failed_model_calls"] or candidate["failed_workers"])
+        with self.evolution_console.lock:
+            release = self.releases.observe_shadow(tenant_id, "llm-review", parent_id, "shadow",
+                self._shadow_summary(parent), candidate, failed)
+        if release and release["status"] == "promoted":
+            self.reload_skills()
 
     def _observe_release(self, task_id: str, tenant_id: str, failed: bool) -> None:
         task = self.store.get(task_id, tenant_id) or {}
@@ -405,6 +473,17 @@ class ReviewService:
             })
         if diff is None:
             raise PermanentTaskError("task payload no longer exists")
+        if task.get("input", {}).get("source") == "shadow":
+            deployment = self.store.get_deployment(tenant_id, "llm-review") or {}
+            if (deployment.get("status") != "running"
+                    or deployment.get("release_id") != task["input"].get("shadow_release_id")):
+                if task["state"] not in {"SUCCESS", "FAILED", "CANCELLED"}:
+                    step = max([item["step"] for item in task.get("trace", [])] or [0]) + 1
+                    self.store.cancel(task_id, TraceEvent(step, TaskState.CANCELLED, "Shadow trial stopped", utc_now()))
+                return
+            self._run_review(task_id, payload["repository"], payload.get("pull_request"), diff, tenant_id)
+            self._record_shadow(task_id, tenant_id)
+            return
         try:
             with self.observability.span(
                 "review.async", task_id, task_id=task_id, tenant_id=tenant_id,
@@ -448,6 +527,8 @@ class ReviewService:
             tenant_id, "dlq:%s" % (task_id or "unknown"), "critical",
             "Task %s entered the dead-letter queue: %s" % (task_id, error),
         )
+        if (task or {}).get("input", {}).get("source") == "shadow":
+            self._record_shadow(task_id, tenant_id)
         metrics.inc("dead_letters_total")
 
     def handle_github_pull_request(

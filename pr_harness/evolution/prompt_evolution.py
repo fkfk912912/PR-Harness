@@ -333,12 +333,15 @@ class EvolutionEngine:
 
     def propose(
         self, skill_name: str, prompt: str, regression_score: Optional[float] = None,
+        activation_policy: str = "auto",
     ) -> Dict[str, Any]:
         skill_name = skill_name.strip()
         if not skill_name or len(skill_name) > 120:
             raise ValueError("skill_name is required and must be at most 120 characters")
+        if activation_policy not in {"auto", "shadow"}:
+            raise ValueError("activation_policy must be auto or shadow")
         with self._lock:
-            return self._propose(skill_name, prompt, regression_score)
+            return self._propose(skill_name, prompt, regression_score, activation_policy)
 
     def _propose(
         self, skill_name: str, prompt: str, regression_score: Optional[float],
@@ -483,7 +486,10 @@ class EvolutionEngine:
 
     def auto_propose(
         self, skill_name: str = "llm-review", tenant_id: Optional[str] = None,
+        activation_policy: str = "auto",
     ) -> Dict[str, Any]:
+        if activation_policy not in {"auto", "shadow"}:
+            raise ValueError("activation_policy must be auto or shadow")
         cases = self.store.list_failure_cases(True, 100, tenant_id)
         active = self.store.get_active_skill_version(skill_name)
         base = active["prompt"] if active else DEFAULT_PROMPT
@@ -576,7 +582,7 @@ class EvolutionEngine:
         candidate = base.rstrip() + (
             "\n\nLearned constraints:\n- " + "\n- ".join(additions)
         )
-        result = self.propose(skill_name, candidate)
+        result = self.propose(skill_name, candidate, activation_policy=activation_policy)
         result["failure_cases_used"] = len(cases)
         result["learned_categories"] = counts
         result["learned_rule_ids"] = learned_rule_ids

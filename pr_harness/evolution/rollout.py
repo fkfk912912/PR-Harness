@@ -1,5 +1,6 @@
 """Deterministic canary and shadow assignment with automatic rollback."""
 import hashlib
+import math
 from typing import Dict, Optional
 
 
@@ -14,19 +15,29 @@ class ReleaseManager:
             raise ValueError("canary_percent and shadow_percent must be between 0 and 100")
         if config.get("candidate_version") is None:
             raise ValueError("candidate_version is required")
+        if not 1 <= int(config.get("min_samples", 20)) <= 10000:
+            raise ValueError("min_samples must be between 1 and 10000")
+        for key in ("max_error_rate", "max_disagreement_rate"):
+            value = float(config.get(key, .1 if key == "max_error_rate" else .2))
+            if not math.isfinite(value) or not 0 <= value <= 1:
+                raise ValueError(key + " must be between 0 and 1")
+        if not isinstance(config.get("auto_promote", False), bool):
+            raise ValueError("auto_promote must be boolean")
         self.store.save_deployment(tenant_id, skill_name, config)
         return self.store.get_deployment(tenant_id, skill_name)
 
     def assignment(self, tenant_id: str, skill_name: str, key: str) -> Dict[str, object]:
         deployment = self.store.get_deployment(tenant_id, skill_name)
-        if not deployment or deployment["status"] != "running":
+        if not deployment:
             return {"lane": "stable", "shadow": False, "deployment": None}
+        if deployment["status"] != "running":
+            return {"lane": "stable", "shadow": False, "deployment": deployment}
         bucket = int(hashlib.sha256(
             ("%s:%s:%s" % (tenant_id, skill_name, key)).encode("utf-8")
         ).hexdigest()[:8], 16) % 100
         return {
             "lane": "canary" if bucket < deployment["canary_percent"] else "stable",
-            "shadow": bucket < deployment["shadow_percent"],
+            "shadow": bucket >= deployment["canary_percent"] and bucket < deployment["shadow_percent"],
             "deployment": deployment,
         }
 
